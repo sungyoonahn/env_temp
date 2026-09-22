@@ -1,0 +1,41 @@
+# TACS configuration for datasets/Swissprot/cellular_component_trainable.csv.
+experiment:
+  name: tacs_cellular_component
+  seed: 42
+  output_dir: outputs/tacs
+  ablation: full_tacs
+
+data:
+  task: cellular_component
+  swiss_csv: datasets/Swissprot/cellular_component_trainable.csv
+  trembl_candidates: outputs/tacs/data/cellular_component_trembl_candidates.parquet
+  conflict_policy: specific_over_background
+  background_label: 0
+
+split:
+  method: random
+
+model:
+  esm_model_name: facebook/esm2_t33_650M_UR50D
+  encoder_mode: frozen
+  device: cuda
+
+selection:
+  strategy: threshold_top_k
+  confidence_threshold: 0.95
+  knn_agreement_threshold: 0.90
+  max_trembl_per_round: 10000
+  balance_by_class: true
+  max_trembl_per_class_per_round: null
+  curriculum:
+    - confidence: 0.98
+      knn_agreement: 1.00
+    - confidence: 0.95
+      knn_agreement: 0.90
+    - confidence: 0.90
+      knn_agreement: 0.80
+
+training:
+  rounds: 3
+  trembl_base_weight: 0.30
+  sampling_strategy: sqrt_inverse_frequency

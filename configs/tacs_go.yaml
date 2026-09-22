@@ -1,0 +1,94 @@
+# One task is trained per run because each local Swiss-Prot CSV has its own
+# keyword-to-label mapping.  Start with biological_process, then change task
+# and swiss_csv for cellular_component or molecular_function.
+experiment:
+  name: tacs_go
+  seed: 42
+  output_dir: outputs/tacs
+  ablation: full_tacs
+  retrain_from_scratch: true
+
+data:
+  task: biological_process
+  swiss_csv: datasets/Swissprot/biological_process_trainable.csv
+  # This 43.1 GiB source stays on HDD_E and is streamed once by the preparation
+  # script; no redundant source copy is made into the workspace.
+  trembl_source_csv: datasets/TREMBL/uniprotkb_taxonomy_id_2_AND_unreviewed_tr_2025_08_20_processed.csv
+  trembl_candidates: outputs/tacs/data/biological_process_trembl_candidates.parquet
+  conflict_policy: specific_over_background
+  background_label: 0
+  candidate_read_batch_size: 10000
+
+split:
+  # Use `cluster` and set data.cluster_column after adding MMseqs2/CD-HIT cluster
+  # IDs to the Swiss CSV.  Random uses strict exact-sequence separation only.
+  method: random
+  seed_fraction: 0.20
+  candidate_fraction: 0.60
+  validation_fraction: 0.10
+  test_fraction: 0.10
+  # Labels with <=500 cleaned Swiss proteins receive at least 30 validation
+  # and 30 final-test examples; half of the remaining trusted data seeds training.
+  min_validation_per_class: 30
+  min_test_per_class: 30
+  rare_class_max_size: 500
+  rare_class_seed_fraction: 0.50
+
+model:
+  esm_model_name: facebook/esm2_t33_650M_UR50D
+  encoder_mode: frozen
+  max_length: 1024
+  embedding_batch_size: 4
+  cache_shard_size: 5000
+  classifier: mlp
+  hidden_dim: 512
+  dropout: 0.20
+  device: cuda
+
+anchor:
+  # Crucial default: validation/test and TrEMBL are not anchors.
+  scope: active_swiss
+  include_high_confidence_trembl: false
+  metric: cosine
+  k: 10
+  distance_reduction: mean
+
+selection:
+  strategy: threshold_top_k
+  confidence_threshold: 0.95
+  knn_agreement_threshold: 0.90
+  distance_threshold: null
+  distance_temperature: 0.25
+  require_model_knn_agreement: true
+  require_trembl_model_agreement: true
+  require_trembl_knn_agreement: false
+  max_trembl_per_round: 10000
+  # Strict cap prevents a high-confidence background class from taking every slot.
+  balance_by_class: true
+  max_trembl_per_class_per_round: null
+  trembl_training_label: annotation
+  curriculum:
+    - confidence: 0.98
+      knn_agreement: 1.00
+    - confidence: 0.95
+      knn_agreement: 0.90
+    - confidence: 0.90
+      knn_agreement: 0.80
+
+evaluation:
+  # Swiss-test percentile bootstrap intervals, including per-class F1.
+  bootstrap_samples: 1000
+  confidence_level: 0.95
+
+training:
+  rounds: 3
+  batch_size: 256
+  epochs: 30
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  swiss_weight: 1.0
+  trembl_base_weight: 0.30
+  num_workers: 0
+  # Tempered inverse-frequency sampling; use class_balanced for equal class mass.
+  sampling_strategy: sqrt_inverse_frequency
+  early_stopping_patience: 6
